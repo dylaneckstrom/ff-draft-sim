@@ -151,14 +151,20 @@ tbody tr:hover {
   color: #c5c8cf;
 }
 
+span{
+  text-align: center;
+}
+
 .position-badge {
-  display: inline-block;
+  display: block;
   background: #232733;
   color: #9aa0ab;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 3px 0;
+  border-radius: 2px;
+  text-align: center;
+  margin-top: 3px;
 }
 
 .empty-state {
@@ -313,7 +319,7 @@ tbody tr:hover {
 .draft-grid-cell {
   border: 1px solid #1e2128;
   padding: 6px;
-  text-align: center;
+  text-align: left;
   vertical-align: middle;
   height: 44px;
   min-width: 90px;
@@ -326,10 +332,11 @@ tbody tr:hover {
 
 .draft-grid-player-name {
   font-weight: 500;
-  font-size: 11px;
+  font-size: 9px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
 }
 
 .draft-grid-empty {

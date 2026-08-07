@@ -12,7 +12,7 @@ players_router = APIRouter(prefix="/players", tags=["players"])
 
 @players_router.get("")
 async def list_players(
-    position: Optional[str] = Query(None, description="Filter by position group: QB, RB, WR, TE, DL, LB, DB"),
+    position: Optional[str] = Query(None, description="Filter by position group: QB, RB, WR, DL, LB, DB"),
     limit: int = 300,
 ):
     players = load_players()
@@ -30,7 +30,7 @@ draft_router = APIRouter(prefix="/draft", tags=["draft"])
 
 
 class CreateDraftRequest(BaseModel):
-    num_teams: int = 10
+    num_teams: int = 14
     rounds: int = 15
     human_slot: int = 1
 
@@ -54,6 +54,12 @@ async def get_draft():
     if state is None:
         raise HTTPException(404, "No draft has been created yet")
     return state
+
+
+@draft_router.delete("")
+async def reset_draft():
+    draft_data.reset_draft()
+    return {"status": "reset"}
 
 
 @draft_router.post("/pick")

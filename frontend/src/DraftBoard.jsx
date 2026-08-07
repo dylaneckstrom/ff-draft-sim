@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 
 const API_URL = "http://localhost:8000";
 
-const POSITION_TABS = ["ALL", "QB", "RB", "WR", "TE", "DL", "LB", "DB"];
+const POSITION_TABS = ["ALL", "QB", "RB", "WR", "FLEX", "DL", "LB", "DB"];
+
+// Positions that count toward the FLEX filter
+const FLEX_POSITIONS = ["RB", "WR"];
 
 // Friendly column labels per position group, matching the raw stat field
 // names the backend returns in each player's `stats` object.
@@ -20,17 +23,15 @@ const STAT_COLUMNS = {
     { key: "rush_td", label: "Rush TD" },
     { key: "rec", label: "Rec" },
     { key: "rec_yd", label: "Rec Yd" },
+    { key: "rec_td", label: "Rec TD" },
   ],
   WR: [
     { key: "rec", label: "Rec" },
     { key: "rec_yd", label: "Rec Yd" },
     { key: "rec_td", label: "Rec TD" },
+    { key: "rush_att", label: "Att" },
     { key: "rush_yd", label: "Rush Yd" },
-  ],
-  TE: [
-    { key: "rec", label: "Rec" },
-    { key: "rec_yd", label: "Rec Yd" },
-    { key: "rec_td", label: "Rec TD" },
+    { key: "rush_td", label: "Rush TD" },
   ],
   DL: [
     { key: "idp_tkl", label: "Tkl" },
@@ -55,7 +56,7 @@ export default function DraftBoard() {
   const [draft, setDraft] = useState(null);
   const [available, setAvailable] = useState([]);
   const [status, setStatus] = useState("checking"); // checking | none | active | error
-  const [numTeams, setNumTeams] = useState(10);
+  const [numTeams, setNumTeams] = useState(14);
   const [rounds, setRounds] = useState(15);
   const [humanSlot, setHumanSlot] = useState(1);
 
@@ -123,6 +124,14 @@ export default function DraftBoard() {
       });
   }
 
+  function startOver() {
+    fetch(`${API_URL}/draft`, { method: "DELETE" }).then(() => {
+      setDraft(null);
+      setAvailable([]);
+      setStatus("none");
+    });
+  }
+
   function handleSort(key) {
     if (key === sortKey) {
       setSortDir(sortDir === "desc" ? "asc" : "desc");
@@ -138,12 +147,24 @@ export default function DraftBoard() {
     setSortDir("desc");
   }
 
-  const columns = positionFilter === "ALL" ? [] : STAT_COLUMNS[positionFilter] || [];
+  // Splits "Josh Allen" into { first: "Josh", last: "Allen" }.
+// Handles multi-word last names (e.g. "Amon-Ra St. Brown") by treating
+// everything after the first word as the last name.
+  function splitName(fullName) {
+    const [first, ...rest] = fullName.split(" ");
+    return { first, last: rest.join(" ") };
+  }
+
+  const columns = positionFilter === "ALL" || positionFilter === "FLEX"
+    ? []
+    : STAT_COLUMNS[positionFilter] || [];
 
   const visiblePlayers = useMemo(() => {
     let result = available;
 
-    if (positionFilter !== "ALL") {
+    if (positionFilter === "FLEX") {
+      result = result.filter((p) => FLEX_POSITIONS.includes(p.position_group));
+    } else if (positionFilter !== "ALL") {
       result = result.filter((p) => p.position_group === positionFilter);
     }
 
@@ -241,6 +262,9 @@ export default function DraftBoard() {
             ? "Your turn"
             : `${currentTeam?.name}'s turn`}
         </span>
+        <button className="text-button" onClick={startOver}>
+          Start Over
+        </button>
       </div>
 
       <div className="draft-grid-wrapper">
@@ -275,8 +299,14 @@ export default function DraftBoard() {
                     >
                       {pick ? (
                         <>
-                          <div className="draft-grid-player-name">{pick.player_name}</div>
-                          <span className="position-badge">{pick.position}</span>
+                          <div className="draft-grid-player-name">
+                            {splitName(pick.player_name).first}
+                            <br />
+                            {splitName(pick.player_name).last}
+                          </div>
+
+                          <span className="position-badge">{pick.position} - {pick.team}</span>
+                          
                         </>
                       ) : (
                         <span className="draft-grid-empty">

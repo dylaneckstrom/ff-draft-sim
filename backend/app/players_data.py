@@ -8,16 +8,21 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from .scoring import calculate_points
+
 PROJECTIONS_FILE = Path(__file__).parent.parent / "player_projections.json"
 
 # Sleeper's real position taxonomy is more granular than standard fantasy
 # positions - this maps each raw position onto the bucket you care about.
+# TE folds directly into WR (not its own group) since this league has no
+# separate TE requirement - individual players still show "TE" as their
+# raw `position` for display, they just count as WR everywhere else.
 POSITION_GROUPS = {
     "QB": "QB",
     "RB": "RB",
     "FB": "RB",
     "WR": "WR",
-    "TE": "TE",
+    "TE": "WR",
     "DL": "DL", "DE": "DL", "DT": "DL", "NT": "DL",
     "LB": "LB", "OLB": "LB", "ILB": "LB",
     "DB": "DB", "CB": "DB", "SS": "DB", "FS": "DB", "S": "DB",
@@ -27,7 +32,6 @@ STAT_FIELDS_BY_GROUP = {
     "QB": ["pass_yd", "pass_td", "pass_int", "pass_cmp", "pass_att", "rush_yd", "rush_td"],
     "RB": ["rush_att", "rush_yd", "rush_td", "rec", "rec_yd", "rec_td"],
     "WR": ["rec", "rec_yd", "rec_td", "rush_att", "rush_yd", "rush_td"],
-    "TE": ["rec", "rec_yd", "rec_td", "rush_att", "rush_yd", "rush_td"],
     "DL": ["idp_tkl", "idp_tkl_solo", "idp_tkl_ast", "idp_sack", "idp_ff", "idp_fum_rec", "idp_int", "idp_safe"],
     "LB": ["idp_tkl", "idp_tkl_solo", "idp_tkl_ast", "idp_sack", "idp_int", "idp_ff", "idp_fum_rec"],
     "DB": ["idp_tkl", "idp_tkl_solo", "idp_tkl_ast", "idp_int", "idp_ff", "idp_fum_rec"],
@@ -67,7 +71,7 @@ def load_players() -> list[dict]:
             "position": raw_position,
             "position_group": group,
             "team": player.get("team"),
-            "projected_points": stats.get("pts_ppr") or stats.get("pts_std") or 0,
+            "projected_points": calculate_points(stats),
             "stats": {field: stats.get(field, 0) for field in relevant_fields},
         })
 

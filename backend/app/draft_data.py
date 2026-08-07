@@ -1,16 +1,23 @@
 """
 Snake draft engine. In-memory only (no database) - state lives for the
-life of the server process. Same "load once, keep in memory" pattern as
-players_data.py, but this data actually mutates as picks happen.
+life of the server process.
 
-If you later want the draft to survive a server restart, or support
-multiple people picking from different devices, this is the piece that
-would move into a database - the shape of DRAFT_STATE below maps
-directly onto a Draft/DraftTeam/DraftPick table design.
+Single draft at a time, shared by everyone hitting the server - simplest
+possible setup for one person using the app. If multiple people load the
+site simultaneously they'd see the same draft. Revisit multi-draft
+support (keyed by ID) later if that becomes a real need.
 """
+import random
+from collections import defaultdict
+
 from .players_data import load_players
 
-DRAFT_STATE = None  # single draft at a time - reset by calling create_draft()
+DRAFT_STATE = None  # reset by calling create_draft()
+
+# Every draftable position group, used to initialize each team's counters.
+# TE folds into WR at the source (see players_data.py) so it's not listed
+# separately here.
+ALL_POSITION_GROUPS = ["QB", "RB", "WR", "DL", "LB", "DB"]
 
 
 def team_for_pick(pick_number: int, num_teams: int) -> int:
@@ -36,6 +43,7 @@ def create_draft(num_teams: int = 10, rounds: int = 15, human_slot: int = 1):
             "name": f"Team {slot}" if is_bot else "My Team",
             "is_bot": is_bot,
             "roster": [],
+            "position_counts": {pos: 0 for pos in ALL_POSITION_GROUPS},
         })
 
     DRAFT_STATE = {
@@ -48,7 +56,7 @@ def create_draft(num_teams: int = 10, rounds: int = 15, human_slot: int = 1):
         "drafted_player_ids": set(),
     }
 
-    _advance_bots()
+    _advance_bots(DRAFT_STATE)
     return get_state()
 
 
@@ -56,85 +64,181 @@ def get_state():
     if DRAFT_STATE is None:
         return None
     # `drafted_player_ids` is a set, not JSON-serializable - omit it from output
-    state = {k: v for k, v in DRAFT_STATE.items() if k != "drafted_player_ids"}
-    return state
+    return {k: v for k, v in DRAFT_STATE.items() if k != "drafted_player_ids"}
 
 
-def _current_team():
-    slot = team_for_pick(DRAFT_STATE["current_pick_number"], DRAFT_STATE["num_teams"])
-    return next(t for t in DRAFT_STATE["teams"] if t["slot"] == slot)
+def _current_team(state: dict):
+    slot = team_for_pick(state["current_pick_number"], state["num_teams"])
+    return next(t for t in state["teams"] if t["slot"] == slot)
 
 
-def _available_players():
+def _available_players(state: dict):
     all_players = load_players()
-    drafted = DRAFT_STATE["drafted_player_ids"]
+    drafted = state["drafted_player_ids"]
     return [p for p in all_players if p["player_id"] not in drafted]
 
 
-def _record_pick(team: dict, player: dict):
+def _record_pick(state: dict, team: dict, player: dict):
     pick = {
-        "pick_number": DRAFT_STATE["current_pick_number"],
+        "pick_number": state["current_pick_number"],
         "team_slot": team["slot"],
         "player_id": player["player_id"],
         "player_name": player["name"],
         "position": player["position"],
+        "team": player["team"],
     }
-    DRAFT_STATE["picks"].append(pick)
-    DRAFT_STATE["drafted_player_ids"].add(player["player_id"])
+    state["picks"].append(pick)
+    state["drafted_player_ids"].add(player["player_id"])
     team["roster"].append(pick)
+    team["position_counts"][player["position_group"]] = (
+        team["position_counts"].get(player["position_group"], 0) + 1
+    )
 
-    DRAFT_STATE["current_pick_number"] += 1
-    total_picks = DRAFT_STATE["rounds"] * DRAFT_STATE["num_teams"]
-    if DRAFT_STATE["current_pick_number"] > total_picks:
-        DRAFT_STATE["status"] = "complete"
+    state["current_pick_number"] += 1
+    total_picks = state["rounds"] * state["num_teams"]
+    if state["current_pick_number"] > total_picks:
+        state["status"] = "complete"
 
 
-def _choose_bot_player():
+# Hard cap on how many players a team can draft at each position group.
+# A position hitting its limit is completely excluded from bot
+# consideration - not just deprioritized.
+POSITION_LIMITS = {
+    "QB": 2,
+    "RB": 10,
+    "WR": 10,   # TE players are folded into WR at the source (players_data.py)
+    "DL": 2,
+    "LB": 2,
+    "DB": 2,
+}
+
+
+def _need_count(counts: dict, position: str) -> int:
+    """How many players a team already has at this position."""
+    return counts.get(position, 0)
+
+
+# Base weight per position group - multiplies against the need-based
+# weight below. 1.0 is neutral. Values above 1.0 make a position more
+# likely to be picked overall (all else equal); below 1.0 makes it less
+# likely. Tune these to shift the bots' general draft priorities.
+POSITION_WEIGHTS = {
+    "QB": 0.9,   # QBs score very high under this league's scoring, so bots
+                 # would over-draft them without this counterweight
+    "RB": 1.5,
+    "WR": 1.3,   # includes TE players, folded in at the source
+    "DL": 0.1,
+    "LB": 0.1,
+    "DB": 0.05,
+}
+
+# Defensive positions can't be drafted by bots before this round.
+DEFENSE_POSITIONS = {"DL", "LB", "DB"}
+MIN_DEFENSE_ROUND = 4
+
+
+def _current_round(state: dict) -> int:
+    return (state["current_pick_number"] - 1) // state["num_teams"] + 1
+
+
+def _choose_bot_player(state: dict, team: dict):
     """
-    Simplest viable strategy: take the highest-projected player left on
-    the board. Swap this out for positional-need logic later - it's
-    isolated here on purpose so the turn-order code never has to change.
+    Weighted-random pick instead of always grabbing the single highest-
+    projected player.
+
+    1. WHICH POSITION: weighted by (a) how few of that position the team
+       already has - need_count, positions they're light on are more
+       likely - and (b) a fixed POSITION_WEIGHTS multiplier per position,
+       so overall draft priorities can be tuned independent of need.
+       Positions at their POSITION_LIMITS cap are excluded entirely, and
+       defense (DL/LB/DB) is excluded entirely before MIN_DEFENSE_ROUND.
+       (TE players are folded into WR at the source - see
+       players_data.py - so there's no separate TE bucket to weight.)
+    2. WHICH PLAYER at that position: picked randomly from the top few
+       by points, not always the single #1 - avoids every bot drafting
+       the exact same player order.
     """
-    available = _available_players()
-    return available[0] if available else None
+    available = _available_players(state)
+    if not available:
+        return None
+
+    by_position = defaultdict(list)
+    for p in available:
+        by_position[p["position_group"]].append(p)
+
+    counts = team["position_counts"]
+    current_round = _current_round(state)
+
+    # exclude any position that's hit its cap
+    positions = [
+        pos for pos in by_position.keys()
+        if _need_count(counts, pos) < POSITION_LIMITS.get(pos, float("inf"))
+    ]
+
+    # exclude defense entirely before MIN_DEFENSE_ROUND
+    if current_round < MIN_DEFENSE_ROUND:
+        positions = [pos for pos in positions if pos not in DEFENSE_POSITIONS]
+
+    if not positions:
+        # everything got excluded (caps + defense restriction both hit,
+        # or a very early round with nothing else left) - fall back to
+        # every available position rather than failing to pick at all
+        positions = list(by_position.keys())
+
+    # fewer already drafted at a position -> higher weight -> more likely
+    # picked, then scaled by the fixed per-position priority multiplier
+
+    weights = [POSITION_WEIGHTS.get(pos, 1.0) for pos in positions]
+    chosen_position = random.choices(positions, weights=weights, k=1)[0]
+
+    candidates = sorted(
+        by_position[chosen_position], key=lambda p: p["projected_points"], reverse=True
+    )[:3]
+    weights = [75, 18, 7][:len(candidates)]
+    return random.choices(candidates, weights=weights, k=1)[0]
 
 
-def _advance_bots():
+def _advance_bots(state: dict):
     """Runs bot picks until it's the human's turn or the draft ends."""
-    while DRAFT_STATE["status"] == "active":
-        team = _current_team()
+    while state["status"] == "active":
+        team = _current_team(state)
         if not team["is_bot"]:
             break
 
-        player = _choose_bot_player()
+        player = _choose_bot_player(state, team)
         if player is None:
-            DRAFT_STATE["status"] = "complete"
+            state["status"] = "complete"
             break
 
-        _record_pick(team, player)
+        _record_pick(state, team, player)
 
 
 def make_human_pick(player_id: str):
     if DRAFT_STATE is None or DRAFT_STATE["status"] != "active":
         raise ValueError("No active draft")
 
-    team = _current_team()
+    team = _current_team(DRAFT_STATE)
     if team["is_bot"]:
         raise ValueError("It is not the human's turn")
 
-    player = next((p for p in _available_players() if p["player_id"] == player_id), None)
+    player = next((p for p in _available_players(DRAFT_STATE) if p["player_id"] == player_id), None)
     if player is None:
         raise ValueError("Player not found or already drafted")
 
-    _record_pick(team, player)
-    _advance_bots()
+    _record_pick(DRAFT_STATE, team, player)
+    _advance_bots(DRAFT_STATE)
     return get_state()
+
+
+def reset_draft():
+    global DRAFT_STATE
+    DRAFT_STATE = None
 
 
 def available_players(position: str = None, limit: int = 300):
     if DRAFT_STATE is None:
         return []
-    players = _available_players()
+    players = _available_players(DRAFT_STATE)
     if position:
         players = [p for p in players if p["position_group"] == position]
     return players[:limit]
