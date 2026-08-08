@@ -12,6 +12,8 @@ Run with:
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
+# ... (added near the top with the other imports)
 
 from .players_data import load_players
 from .routers import players_router, draft_router
@@ -26,10 +28,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Fantasy Draft App", lifespan=lifespan)
 
-# Vite's default dev server port. Add your deployed frontend URL here too, later.
+# Comma-separated list of allowed frontend origins, e.g.
+# "https://ff-draft-sim.vercel.app,http://localhost:5173"
+# Set CORS_ORIGINS in your host's environment variables when deploying -
+# no code change or redeploy needed to add/change allowed origins.
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
