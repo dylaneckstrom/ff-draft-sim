@@ -571,4 +571,12 @@ tbody tr:hover {
     margin: 32px auto;
     padding: 16px;
   }
+
+  .name-cell {
+  position: sticky;
+  left: 0;
+  background: #0f1115;
+  font-weight: 500;
+}
+
 }
