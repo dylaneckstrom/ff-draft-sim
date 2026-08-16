@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .players_data import load_players
 from . import draft_data
@@ -32,7 +32,7 @@ draft_router = APIRouter(prefix="/draft", tags=["draft"])
 class CreateDraftRequest(BaseModel):
     num_teams: int = 14
     rounds: int = 15
-    human_slot: int = 1
+    human_slots: List[int] = Field(default_factory=lambda: [1])
 
 
 class MakePickRequest(BaseModel):
@@ -44,7 +44,7 @@ async def create_draft(req: CreateDraftRequest):
     return draft_data.create_draft(
         num_teams=req.num_teams,
         rounds=req.rounds,
-        human_slot=req.human_slot,
+        human_slots=req.human_slots,
     )
 
 

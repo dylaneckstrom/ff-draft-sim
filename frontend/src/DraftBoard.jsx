@@ -4,6 +4,30 @@ import { useEffect, useMemo, useState } from "react";
 // point at the deployed backend. Falls back to localhost for local dev.
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+// Number inputs need to allow an empty string as valid transient state
+// while the user is editing - forcing Number("") to 0 immediately (and
+// feeding that back as the controlled value) causes the classic "stuck
+// leading zero" bug: clearing the field re-renders it as "0" instead of
+// blank, so the next digit typed lands after that phantom 0 (e.g. "04").
+function handleNumberChange(rawValue, setter) {
+  if (rawValue === "") {
+    setter("");
+    return;
+  }
+  const num = Number(rawValue);
+  if (!Number.isNaN(num)) {
+    setter(num);
+  }
+}
+
+// On blur, snap back to a sensible default if the field was left empty
+// (or somehow ended up non-numeric) instead of staying blank forever.
+function handleNumberBlur(value, setter, fallback) {
+  if (value === "" || Number.isNaN(Number(value))) {
+    setter(fallback);
+  }
+}
+
 const POSITION_TABS = ["ALL", "QB", "RB", "WR", "FLEX", "DL", "LB", "DB"];
 
 // Positions that count toward the FLEX filter
@@ -25,15 +49,12 @@ const STAT_COLUMNS = {
     { key: "rush_td", label: "Rush TD" },
     { key: "rec", label: "Rec" },
     { key: "rec_yd", label: "Rec Yd" },
-    { key: "rec_td", label: "Rec TD" },
   ],
   WR: [
     { key: "rec", label: "Rec" },
     { key: "rec_yd", label: "Rec Yd" },
     { key: "rec_td", label: "Rec TD" },
-    { key: "rush_att", label: "Att" },
     { key: "rush_yd", label: "Rush Yd" },
-    { key: "rush_td", label: "Rush TD" },
   ],
   DL: [
     { key: "idp_tkl", label: "Tkl" },
@@ -60,16 +81,26 @@ export default function DraftBoard() {
   const [status, setStatus] = useState("checking"); // checking | none | active | error
   const [numTeams, setNumTeams] = useState(14);
   const [rounds, setRounds] = useState(15);
-  const [humanSlot, setHumanSlot] = useState(1);
+  const [humanSlots, setHumanSlots] = useState([1]); // array of specific slot numbers
 
   const [positionFilter, setPositionFilter] = useState("ALL");
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState("projected_points");
-  const [sortDir, setSortDir] = useState("desc");
+  const [sortKey, setSortKey] = useState("adp");
+  const [sortDir, setSortDir] = useState("asc");
 
   useEffect(() => {
     fetchDraftState();
   }, []);
+
+  // if numTeams shrinks below a previously-selected human slot, drop it -
+  // never leave the list empty though, always keep at least slot 1
+  useEffect(() => {
+    const max = Number(numTeams) || 14;
+    setHumanSlots((prev) => {
+      const filtered = prev.filter((s) => s <= max);
+      return filtered.length > 0 ? filtered : [1];
+    });
+  }, [numTeams]);
 
   function fetchDraftState() {
     fetch(`${API_URL}/draft`)
@@ -103,7 +134,11 @@ export default function DraftBoard() {
     fetch(`${API_URL}/draft`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ num_teams: numTeams, rounds, human_slot: humanSlot }),
+      body: JSON.stringify({
+        num_teams: Number(numTeams) || 14,
+        rounds: Number(rounds) || 15,
+        human_slots: humanSlots.length > 0 ? humanSlots : [1],
+      }),
     })
       .then((res) => res.json())
       .then((data) => {
@@ -111,6 +146,18 @@ export default function DraftBoard() {
         setStatus("active");
         fetchAvailable();
       });
+  }
+
+  function toggleHumanSlot(slot) {
+    setHumanSlots((prev) => {
+      if (prev.includes(slot)) {
+        // don't allow removing the last selected slot - at least one
+        // human team must exist
+        if (prev.length === 1) return prev;
+        return prev.filter((s) => s !== slot);
+      }
+      return [...prev, slot].sort((a, b) => a - b);
+    });
   }
 
   function draftPlayer(playerId) {
@@ -139,22 +186,14 @@ export default function DraftBoard() {
       setSortDir(sortDir === "desc" ? "asc" : "desc");
     } else {
       setSortKey(key);
-      setSortDir("desc");
+      setSortDir(key === "adp" ? "asc" : "desc"); // lower ADP = better, so ascending by default
     }
   }
 
   function handlePositionChange(pos) {
     setPositionFilter(pos);
-    setSortKey("projected_points");
-    setSortDir("desc");
-  }
-
-  // Splits "Josh Allen" into { first: "Josh", last: "Allen" }.
-// Handles multi-word last names (e.g. "Amon-Ra St. Brown") by treating
-// everything after the first word as the last name.
-  function splitName(fullName) {
-    const [first, ...rest] = fullName.split(" ");
-    return { first, last: rest.join(" ") };
+    // sort selection (key + direction) intentionally left untouched -
+    // switching position tabs shouldn't reset ADP/Points/column sorting
   }
 
   const columns = positionFilter === "ALL" || positionFilter === "FLEX"
@@ -176,8 +215,20 @@ export default function DraftBoard() {
     }
 
     return [...result].sort((a, b) => {
-      const aVal = sortKey === "projected_points" ? a.projected_points : a.stats?.[sortKey] ?? 0;
-      const bVal = sortKey === "projected_points" ? b.projected_points : b.stats?.[sortKey] ?? 0;
+      const getValue = (p) => {
+        if (sortKey === "projected_points") return p.projected_points;
+        if (sortKey === "adp") return p.adp;
+        return p.stats?.[sortKey] ?? 0;
+      };
+      const aVal = getValue(a);
+      const bVal = getValue(b);
+
+      // players with no ADP data (null) always sort to the bottom,
+      // regardless of sort direction - "unranked" should never look best
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+
       return sortDir === "desc" ? bVal - aVal : aVal - bVal;
     });
   }, [available, positionFilter, search, sortKey, sortDir]);
@@ -206,7 +257,8 @@ export default function DraftBoard() {
               min="2"
               max="20"
               value={numTeams}
-              onChange={(e) => setNumTeams(Number(e.target.value))}
+              onChange={(e) => handleNumberChange(e.target.value, setNumTeams)}
+              onBlur={() => handleNumberBlur(numTeams, setNumTeams, 14)}
             />
           </label>
           <label>
@@ -216,18 +268,28 @@ export default function DraftBoard() {
               min="1"
               max="25"
               value={rounds}
-              onChange={(e) => setRounds(Number(e.target.value))}
+              onChange={(e) => handleNumberChange(e.target.value, setRounds)}
+              onBlur={() => handleNumberBlur(rounds, setRounds, 15)}
             />
           </label>
           <label>
-            Your draft slot
-            <input
-              type="number"
-              min="1"
-              max={numTeams}
-              value={humanSlot}
-              onChange={(e) => setHumanSlot(Number(e.target.value))}
-            />
+            Your draft position(s)
+            <span className="field-hint">Tap each position you're drafting for</span>
+            <div className="slot-picker">
+              {Array.from({ length: Number(numTeams) || 14 }, (_, i) => i + 1).map((slot) => (
+                <button
+                  key={slot}
+                  type="button"
+                  className={`slot-toggle ${humanSlots.includes(slot) ? "slot-toggle--active" : ""}`}
+                  onClick={() => toggleHumanSlot(slot)}
+                >
+                  {slot}
+                </button>
+              ))}
+            </div>
+            <div className="slot-picker-summary">
+              Selected: <strong>{[...humanSlots].sort((a, b) => a - b).join(", ")}</strong>
+            </div>
           </label>
           <button className="primary-button" onClick={startDraft}>
             Start Draft
@@ -261,7 +323,7 @@ export default function DraftBoard() {
           {draft.status === "complete"
             ? "Draft complete"
             : isHumanTurn
-            ? "Your turn"
+            ? `${currentTeam?.name}'s turn`
             : `${currentTeam?.name}'s turn`}
         </span>
         <button className="text-button" onClick={startOver}>
@@ -306,9 +368,7 @@ export default function DraftBoard() {
                             <br />
                             {splitName(pick.player_name).last}
                           </div>
-
-                          <span className="position-badge">{pick.position} - {pick.team}</span>
-                          
+                          <span className="position-badge">{pick.position}</span>
                         </>
                       ) : (
                         <span className="draft-grid-empty">
@@ -336,6 +396,20 @@ export default function DraftBoard() {
             </button>
           ))}
         </div>
+        <div className="sort-toggle">
+          <button
+            className={`sort-toggle-option ${sortKey === "adp" ? "sort-toggle-option--active" : ""}`}
+            onClick={() => handleSort("adp")}
+          >
+            ADP
+          </button>
+          <button
+            className={`sort-toggle-option ${sortKey === "projected_points" ? "sort-toggle-option--active" : ""}`}
+            onClick={() => handleSort("projected_points")}
+          >
+            Projected
+          </button>
+        </div>
         <input
           type="text"
           placeholder="Search players..."
@@ -355,6 +429,9 @@ export default function DraftBoard() {
               <th className="sortable" onClick={() => handleSort("projected_points")}>
                 Proj Pts {sortKey === "projected_points" && (sortDir === "desc" ? "▼" : "▲")}
               </th>
+              <th className="sortable" onClick={() => handleSort("adp")}>
+                ADP {sortKey === "adp" && (sortDir === "desc" ? "▼" : "▲")}
+              </th>
               {columns.map((col) => (
                 <th key={col.key} className="sortable" onClick={() => handleSort(col.key)}>
                   {col.label} {sortKey === col.key && (sortDir === "desc" ? "▼" : "▲")}
@@ -372,6 +449,7 @@ export default function DraftBoard() {
                   <span className="position-badge">{p.position}</span>
                 </td>
                 <td className="num-cell">{p.projected_points?.toFixed(1)}</td>
+                <td className="num-cell">{p.adp != null ? p.adp.toFixed(1) : "NR"}</td>
                 {columns.map((col) => (
                   <td key={col.key} className="num-cell">
                     {p.stats?.[col.key] ?? "-"}
@@ -397,6 +475,14 @@ export default function DraftBoard() {
       </div>
     </div>
   );
+}
+
+// Splits "Josh Allen" into { first: "Josh", last: "Allen" }.
+// Handles multi-word last names (e.g. "Amon-Ra St. Brown") by treating
+// everything after the first word as the last name.
+function splitName(fullName) {
+  const [first, ...rest] = fullName.split(" ");
+  return { first, last: rest.join(" ") };
 }
 
 // Mirrors the backend's snake draft order logic (see draft_data.py) so the

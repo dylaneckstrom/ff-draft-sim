@@ -82,15 +82,30 @@ def team_for_pick(pick_number: int, num_teams: int) -> int:
     return num_teams - pos_in_round
 
 
-def create_draft(num_teams: int = 10, rounds: int = 15, human_slot: int = 1):
+def create_draft(num_teams: int = 10, rounds: int = 15, human_slots: list = None):
     global DRAFT_STATE
+
+    # validate/clamp the requested human slots to the actual team range,
+    # falling back to slot 1 if nothing valid was provided
+    if not human_slots:
+        human_slots = [1]
+    human_slot_set = {s for s in human_slots if 1 <= s <= num_teams}
+    if not human_slot_set:
+        human_slot_set = {1}
 
     teams = []
     for slot in range(1, num_teams + 1):
-        is_bot = slot != human_slot
+        is_bot = slot not in human_slot_set
+        if is_bot:
+            name = f"Team {slot}"
+        elif len(human_slot_set) == 1:
+            name = "My Team"
+        else:
+            name = f"User {slot}"
+
         teams.append({
             "slot": slot,
-            "name": f"Team {slot}" if is_bot else "My Team",
+            "name": name,
             "is_bot": is_bot,
             "roster": [],
             "position_counts": {pos: 0 for pos in ALL_POSITION_GROUPS},
@@ -239,9 +254,18 @@ def _choose_bot_player(state: dict, team: dict):
     weights = [POSITION_WEIGHTS.get(pos, 1.0) for pos in positions]
     chosen_position = random.choices(positions, weights=weights, k=1)[0]
 
+    # Sort by ADP (lower = better/earlier consensus pick) instead of our
+    # own projected points - this makes bots draft more like real human
+    # drafters would, based on market consensus rather than our custom
+    # scoring formula. Players with no ADP data (None) sort to the back;
+    # projected_points breaks ties (including among all-unranked groups).
     candidates = sorted(
-            by_position[chosen_position], key=lambda p: p["projected_points"], reverse=True
-        )[:3]
+        by_position[chosen_position],
+        key=lambda p: (
+            p["adp"] if p["adp"] is not None else float("inf"),
+            -p["projected_points"],
+        ),
+    )[:3]
     # weight toward the best player at this position, but not exclusively -
     # trimmed to match len(candidates) in case fewer than 3 are left
     candidate_weights = [75, 18, 7][:len(candidates)]

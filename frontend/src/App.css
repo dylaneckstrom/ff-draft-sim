@@ -71,6 +71,35 @@ body {
   color: white;
 }
 
+.sort-toggle {
+  display: flex;
+  gap: 2px;
+  background: #1a1d24;
+  border: 1px solid #2a2e37;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.sort-toggle-option {
+  background: transparent;
+  border: none;
+  color: #b0b4bb;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sort-toggle-option:hover {
+  color: #e6e8eb;
+}
+
+.sort-toggle-option--active {
+  background: #2e5cff;
+  color: white;
+}
+
 .search-input {
   background: #1a1d24;
   border: 1px solid #2a2e37;
@@ -89,7 +118,8 @@ body {
 .table-wrapper {
   border: 1px solid #2a2e37;
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 table {
@@ -151,20 +181,14 @@ tbody tr:hover {
   color: #c5c8cf;
 }
 
-span{
-  text-align: center;
-}
-
 .position-badge {
-  display: block;
+  display: inline-block;
   background: #232733;
   color: #9aa0ab;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 3px 0;
-  border-radius: 2px;
-  text-align: center;
-  margin-top: 3px;
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
 .empty-state {
@@ -224,6 +248,74 @@ span{
   font-size: 14px;
 }
 
+.field-hint {
+  font-weight: 400;
+  font-size: 12px;
+  color: #6b7078;
+}
+
+.slot-picker {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.slot-toggle {
+  position: relative;
+  background: #1a1d24;
+  border: 2px solid #2a2e37;
+  color: #b0b4bb;
+  padding: 8px 0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.slot-toggle:hover {
+  border-color: #4a72ff;
+  color: #e6e8eb;
+}
+
+.slot-toggle--active {
+  background: #2e5cff;
+  border-color: #7ba1ff;
+  color: white;
+  box-shadow: 0 0 0 2px rgba(46, 92, 255, 0.35);
+}
+
+.slot-toggle--active::after {
+  content: "✓";
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #4ade80;
+  color: #0f1115;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.slot-picker-summary {
+  font-size: 12px;
+  color: #8b8f98;
+  margin-top: 8px;
+}
+
+.slot-picker-summary strong {
+  color: #e6e8eb;
+  font-weight: 600;
+}
+
 .primary-button {
   background: #2e5cff;
   border: none;
@@ -266,6 +358,21 @@ span{
   color: #4ade80;
 }
 
+.text-button {
+  background: transparent;
+  border: 1px solid #2a2e37;
+  color: #8b8f98;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.text-button:hover {
+  border-color: #3d4250;
+  color: #e6e8eb;
+}
+
 .draft-columns {
   display: none; /* layout replaced by draft-grid-wrapper + table-wrapper below */
 }
@@ -274,6 +381,7 @@ span{
   border: 1px solid #2a2e37;
   border-radius: 8px;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   max-height: 480px;
   margin-bottom: 20px;
 }
@@ -319,9 +427,9 @@ span{
 .draft-grid-cell {
   border: 1px solid #1e2128;
   padding: 6px;
-  text-align: left;
+  text-align: center;
   vertical-align: middle;
-  height: 44px;
+  height: 52px;
   min-width: 90px;
 }
 
@@ -332,11 +440,10 @@ span{
 
 .draft-grid-player-name {
   font-weight: 500;
-  font-size: 9px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: left;
 }
 
 .draft-grid-empty {
@@ -371,4 +478,89 @@ span{
 .team-label {
   color: #8b8f98;
   font-size: 12px;
+}
+
+/* --- responsive / mobile --- */
+
+@media (max-width: 640px) {
+  .draft-board {
+    padding: 12px;
+  }
+
+  .draft-status-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  /* stack position tabs, sort toggle, and search full-width instead of
+     cramming them into one row - the row layout only works with room
+     to spare */
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .position-tabs {
+    justify-content: flex-start;
+  }
+
+  .position-tab {
+    padding: 7px 10px; /* slightly larger tap target than desktop's 6px 14px */
+    font-size: 12px;
+  }
+
+  .sort-toggle {
+    align-self: flex-start;
+  }
+
+  .search-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* snake grid: shrink cells so a phone shows a few columns at once
+     instead of one giant cell - the grid stays horizontally scrollable
+     for the rest */
+  .draft-grid-cell {
+    min-width: 64px;
+    height: 46px;
+    padding: 4px;
+  }
+
+  .draft-grid-round-header {
+    width: 28px;
+    min-width: 28px;
+    font-size: 11px;
+  }
+
+  .draft-grid thead th {
+    padding: 6px 4px;
+    font-size: 11px;
+  }
+
+  .draft-grid-player-name {
+    font-size: 10px;
+  }
+
+  /* available players table: smaller text/padding so more columns fit
+     before the horizontal scroll kicks in */
+  table {
+    font-size: 12px;
+  }
+
+  th,
+  td {
+    padding: 7px 8px;
+  }
+
+  .draft-button {
+    padding: 5px 10px; /* slightly larger tap target */
+  }
+
+  .draft-setup {
+    margin: 32px auto;
+    padding: 16px;
+  }
 }

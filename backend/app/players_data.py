@@ -37,6 +37,20 @@ STAT_FIELDS_BY_GROUP = {
     "DB": ["idp_tkl", "idp_tkl_solo", "idp_tkl_ast", "idp_int", "idp_ff", "idp_fum_rec"],
 }
 
+# Which raw Sleeper ADP field is meaningful per position group. Offensive
+# positions use standard-format ADP (adp_std); defensive positions use
+# IDP-format ADP (adp_idp) since they're not part of standard non-IDP
+# mock drafts. Sleeper uses 999.0 as a placeholder for "no real ADP data" -
+# treated as None (unranked) rather than a literal number 999.
+ADP_FIELD_BY_GROUP = {
+    "QB": "adp_std",
+    "RB": "adp_std",
+    "WR": "adp_std",
+    "DL": "adp_idp",
+    "LB": "adp_idp",
+    "DB": "adp_idp",
+}
+
 # Module-level cache - populated once by load_players(), read by every request.
 _players_cache: Optional[list] = None
 
@@ -65,6 +79,10 @@ def load_players() -> list[dict]:
         stats = entry.get("stats", {})
         relevant_fields = STAT_FIELDS_BY_GROUP.get(group, [])
 
+        adp_field = ADP_FIELD_BY_GROUP.get(group)
+        raw_adp = stats.get(adp_field, 999.0) if adp_field else 999.0
+        adp = raw_adp if raw_adp < 999.0 else None  # None = no ADP data (unranked)
+
         results.append({
             "player_id": entry.get("player_id"),
             "name": f"{player.get('first_name', '')} {player.get('last_name', '')}".strip(),
@@ -72,6 +90,7 @@ def load_players() -> list[dict]:
             "position_group": group,
             "team": player.get("team"),
             "projected_points": calculate_points(stats),
+            "adp": adp,
             "stats": {field: stats.get(field, 0) for field in relevant_fields},
         })
 
