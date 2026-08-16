@@ -172,6 +172,9 @@ tbody tr:hover {
 }
 
 .name-cell {
+  position: sticky;
+  left: 0;
+  background: #0f1115;
   font-weight: 500;
 }
 
