@@ -520,6 +520,11 @@ tbody tr:hover {
     min-width: 0;
   }
 
+  .draft-grid {
+    table-layout: auto;
+    
+  }
+
   /* snake grid: shrink cells so a phone shows a few columns at once
      instead of one giant cell - the grid stays horizontally scrollable
      for the rest */
